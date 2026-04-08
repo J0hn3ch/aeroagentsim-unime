@@ -9,14 +9,16 @@ import aeroagentsim
 from aeroagentsim.core.environment import Environment
 from aeroagentsim.agent import DroneAgent, DeliveryDroneAgent
 from aeroagentsim.agent.delivery_station import DeliveryStation
-from aeroagentsim.component import ChargingComponent, LogisticsComponent, MoveToComponent
+
+# Components
+from aeroagentsim.component import ChargingComponent, CommunicationComponent, LogisticsComponent, MoveToComponent
 
 # Workflows
 from aeroagentsim.workflow.inspection import create_inspection_workflow
 from aeroagentsim.workflow.inspection import InspectionWorkflow
 from aeroagentsim.workflow.logistics import LogisticsWorkflow
 
-from aeroagentsim.core.trigger import TimeTrigger
+from aeroagentsim.core.trigger import TimeTrigger, StateTrigger
 
 from aeroagentsim.dataprovider.signal import SignalDataProvider, SignalSource
 from aeroagentsim.dataprovider.signal_integration import ExternalSignalSourceIntegration
@@ -39,9 +41,11 @@ from aeroagentsim.statistics.stats_collector import StatsCollector
 from aeroagentsim.statistics.stats_analyzer import StatsAnalyzer
 from aeroagentsim.statistics.stats_visualizer import StatsVisualizer
 
+import gc
 import logging
 import os
 import pprint
+import psutil
 import sys
 import time
 import uuid
@@ -56,12 +60,21 @@ logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
 mlogger = get_logger(name=__name__)
 mlogger.setLevel('ERROR')
 
-print("\n=====| SYSTEM SPECIFICATION |=====")
+# Monitor memory usage
+def check_memory():
+    process = psutil.Process()
+    memory_mb = process.memory_info().rss / 1024 / 1024
+    print(f"Memory usage: {memory_mb:.1f} MB")
+    print(f"Objects in memory: {len(gc.get_objects())}")
+
+print("\n=====| SYSTEM INFORMATION |=====")
 print(f"|- Python version: {sys.version}")
 print(f"|- AeroAgentSim version: {aeroagentsim.__version__}")
 print(f"|- Platform: {sys.platform}")
 print("-"*40)
 #print(f"Path: {sys.path}")
+
+start_time = time.time()
 
 # Create environment
 env = Environment(visual_interval=100)
@@ -131,7 +144,7 @@ def print_task(task, info_list=None):
 
 
 print("\n=====| SCENARIO |=====")
-
+print("\n-----|  AGENTS  |-----")
 # Create swarm of drones agents
 swarm_1_size = 6
 swarm_1_drones = []
@@ -148,6 +161,9 @@ for i in range(swarm_1_size):
         'battery_level': 100
     })
 
+    # Prefer writing logs/trajectories to run artifacts and trimming. Custom in-memory caches maintained by your own agents/components.
+    drone.max_state_history = 100
+
     # Add components to agent
     drone.add_component(MoveToComponent(env, drone))
     drone.add_component(CommunicationComponent(env, drone))
@@ -155,6 +171,8 @@ for i in range(swarm_1_size):
     # Register agent with environment
     env.register_agent(drone)
     swarm_1_drones.append(drone)
+
+    
 
 swarm_2_size = 6
 swarm_2_drones = []
@@ -168,7 +186,8 @@ for i in range(swarm_2_size):
 
     drone = DroneAgent(env, agent_id=f"SD2_{agent_id}", agent_name=f"S2_drone_{i}", properties={
         'position': (x, y, 100),
-        'battery_level': 100
+        'battery_level': 100,
+        'status': 'idle'
     })
 
     # Add components to agent
@@ -200,9 +219,14 @@ drone.add_component( ChargingComponent(env, drone) )
 component = drone.get_component('ChargingComponent')
 print(f"|- ChargingComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
 
+# Verify component has required metrics
+component = drone.get_component('CommunicationComponent')
+print(f"|- CommunicationComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
+
 #print(f"Drone details: {drone.get_details()}")
 #drone.initialize_components()
 
+print("\n-----|  WORKFLOW  |-----")
 # Execute a movement task
 # - Tasks are managed by components. 
 task = drone.execute_task(
@@ -245,6 +269,22 @@ print(f"Valid transitions: {workflow.status_machine.state_transitions.keys()}")
 for trigger in workflow.status_machine.active_triggers:
     print(f"Trigger {trigger.name}: {trigger.is_active()}")
 """
+print("\n-----|  MISSION  |-----")
+
+# Create conditional trigger: create trigger that fires when ...
+#for drone in 
+"""
+ready_trigger = StateTrigger(
+    env=env,
+    agent_id=drone.id,
+    state_name='battery_level',
+    condition='>=',
+    threshold=80,
+    name="drone_ready_trigger"
+)
+"""
+
+print("\n-----|  DATA INTEGRATION  |-----")
 
 """
 # Data Provider
@@ -292,10 +332,15 @@ print(f"| Workflows: [ {drone.get_active_workflows()} ]")
 
 # Start monitoring (stats collector starts automatically)
 print("\n=====| RUN THE SIMULATION |=====")
-start_time = time.time()
-env.run(until=1000)
-end_time = time.time() - start_time
-print("Time: ", end_time)
+simulation_time = 1000
+env.run(until=simulation_time)
+
+end_time = time.time()
+# Calculate performance metrics
+real_time = end_time - start_time
+print("Real Simulation Time: ", end_time)
+performance_ratio = simulation_time / real_time if real_time > 0 else 0
+print("Perfoarmance Ratio: ", performance_ratio)
 
 print_task(task, info_list='all')
 
@@ -309,6 +354,12 @@ for event in env.event_registry.events.keys():
     if i % 5 == 0:
         print("", end='\n\t')
 print("")
+
+"""
+for e in env._queue:
+    print(e.)
+"""
+
 
 # Analyze collected statistics
 print("\n" +
