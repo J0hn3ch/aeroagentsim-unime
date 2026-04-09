@@ -41,8 +41,12 @@ from aeroagentsim.statistics.stats_collector import StatsCollector
 from aeroagentsim.statistics.stats_analyzer import StatsAnalyzer
 from aeroagentsim.statistics.stats_visualizer import StatsVisualizer
 
+# Plotting
+import matplotlib.pyplot as plt
+
 import gc
 import logging
+import numpy as np
 import os
 import pprint
 import psutil
@@ -54,6 +58,7 @@ import uuid
 os.environ["AEROAGENTSIM_LOG_LEVEL"] = "ERROR"
 os.environ["DEFAULT_LOG_FORMAT"] = "%(asctime)s # %(message)s"
 DEFAULT_LOG_FORMAT = '%(asctime)s # %(message)s'
+PLOT_OUTPUT_DIR = './simulation_stats/visualizations'
 
 # Configure logging
 logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
@@ -156,7 +161,7 @@ for i in range(swarm_1_size):
 
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
 
-    drone = DroneAgent(env, agent_id=f"SD1_{agent_id}", agent_name=f"S2_drone_{i}", properties={
+    drone = DroneAgent(env, agent_id=f"SD1_{agent_id}", agent_name=f"S1_drone_{i}", properties={
         'position': (x, y, 100),
         'battery_level': 100
     })
@@ -171,8 +176,6 @@ for i in range(swarm_1_size):
     # Register agent with environment
     env.register_agent(drone)
     swarm_1_drones.append(drone)
-
-    
 
 swarm_2_size = 6
 swarm_2_drones = []
@@ -210,6 +213,29 @@ drone = env.create_agent(
     },
 ) """
 
+# Plot initial position of each drone
+print(f"|- Drones {'-'*80}")
+fig, ax = plt.subplots(figsize=(12, 6))
+
+swarms = [swarm_1_drones, swarm_2_drones]
+swarms.reverse()
+for color in ['tab:blue', 'tab:red']:
+    position_x = []
+    position_y = []
+    for drone in swarms.pop():
+        print(f"|- Drone {drone.name} position: {drone.properties['position']}")
+        position_x.append( drone.properties['position'][0] )
+        position_y.append( drone.properties['position'][1] )
+    ax.scatter(x=position_x, y=position_y, c=color, label="Swarm" + str(len(swarms)+1), edgecolors='none')
+ax.grid(True)
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_title('Drones position')
+ax.legend()
+output_file = os.path.join(PLOT_OUTPUT_DIR, "drone_position_plot.png")
+plt.savefig(output_file, dpi=300)
+print(f"|---------{'-'*80}")
+
 # Verify component has required metrics
 component = drone.get_component('MoveToComponent')
 print(f"|- MoveToComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
@@ -225,6 +251,7 @@ print(f"|- CommunicationComponent metrics: {[metric for metric in component.curr
 
 #print(f"Drone details: {drone.get_details()}")
 #drone.initialize_components()
+print(f"|- Drone {drone.name} components: {drone.components}")
 
 print("\n-----|  WORKFLOW  |-----")
 # Execute a movement task
