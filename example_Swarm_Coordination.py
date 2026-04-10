@@ -20,6 +20,7 @@ from aeroagentsim.workflow.logistics import LogisticsWorkflow
 
 from aeroagentsim.core.trigger import TimeTrigger, StateTrigger
 
+# Data Integration
 from aeroagentsim.dataprovider.signal import SignalDataProvider, SignalSource
 from aeroagentsim.dataprovider.signal_integration import ExternalSignalSourceIntegration
 
@@ -54,14 +55,13 @@ import sys
 import time
 import uuid
 
-
 os.environ["AEROAGENTSIM_LOG_LEVEL"] = "ERROR"
 os.environ["DEFAULT_LOG_FORMAT"] = "%(asctime)s # %(message)s"
 DEFAULT_LOG_FORMAT = '%(asctime)s # %(message)s'
-PLOT_OUTPUT_DIR = './simulation_stats/visualizations'
+PLOT_OUTPUT_DIR = './simulation_stats'
 
 # Configure logging
-logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
+logging.basicConfig(level=logging.ERROR, format=DEFAULT_LOG_FORMAT)
 mlogger = get_logger(name=__name__)
 mlogger.setLevel('ERROR')
 
@@ -82,7 +82,7 @@ print("-"*40)
 start_time = time.time()
 
 # Create environment
-env = Environment(visual_interval=100)
+env = Environment(visual_interval=15)
 
 # Set up statistics collection
 stats_collector = StatsCollector(
@@ -90,13 +90,13 @@ stats_collector = StatsCollector(
     output_dir='./simulation_stats',
     agent_collector_config={
         'listen_visual_update': True,
-        'collect_interval': 100
+        'collect_interval': 15
     }
 )
 
 logger = get_logger(__name__)
-logger.setLevel(logging.WARNING)
-logger.parent.setLevel(logging.WARNING)
+logger.setLevel(logging.ERROR)
+logger.parent.setLevel(logging.ERROR)
 
 print("| Logger - Description:")
 print(f"|- logger.format: {logger.handlers}")
@@ -143,15 +143,13 @@ def print_task(task, info_list=None):
                 l = l + str(v) + ' ' * i
             h = h + ' | '
             l = l + ' | '
-        
-    print('| ' + h)
-    print('| ' + l)
+    return ('| ' + h, '| ' + l)
 
 
 print("\n=====| SCENARIO |=====")
 print("\n-----|  AGENTS  |-----")
 # Create swarm of drones agents
-swarm_1_size = 6
+swarm_1_size = 3
 swarm_1_drones = []
 
 for i in range(swarm_1_size):
@@ -161,7 +159,7 @@ for i in range(swarm_1_size):
 
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
 
-    drone = DroneAgent(env, agent_id=f"SD1_{agent_id}", agent_name=f"S1_drone_{i}", properties={
+    drone = DroneAgent(env, agent_id=f"SD1_{agent_id}", agent_name=f"Swarm1_Drone{i}", properties={
         'position': (x, y, 100),
         'battery_level': 100
     })
@@ -177,17 +175,17 @@ for i in range(swarm_1_size):
     env.register_agent(drone)
     swarm_1_drones.append(drone)
 
-swarm_2_size = 6
+swarm_2_size = 3
 swarm_2_drones = []
 
 for i in range(swarm_2_size):
     # Distribute drones in a grid
-    x = (i % 3) * 40 + 40 * 3
+    x = (i % 3) * 40 + 40 * 4
     y = (i // 3) * 40
 
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
 
-    drone = DroneAgent(env, agent_id=f"SD2_{agent_id}", agent_name=f"S2_drone_{i}", properties={
+    drone = DroneAgent(env, agent_id=f"SD2_{agent_id}", agent_name=f"Swarm2_Drone{i}", properties={
         'position': (x, y, 100),
         'battery_level': 100,
         'status': 'idle'
@@ -216,7 +214,6 @@ drone = env.create_agent(
 # Plot initial position of each drone
 print(f"|- Drones {'-'*80}")
 fig, ax = plt.subplots(figsize=(12, 6))
-
 swarms = [swarm_1_drones, swarm_2_drones]
 swarms.reverse()
 for color in ['tab:blue', 'tab:red']:
@@ -226,12 +223,15 @@ for color in ['tab:blue', 'tab:red']:
         print(f"|- Drone {drone.name} position: {drone.properties['position']}")
         position_x.append( drone.properties['position'][0] )
         position_y.append( drone.properties['position'][1] )
-    ax.scatter(x=position_x, y=position_y, c=color, label="Swarm" + str(len(swarms)+1), edgecolors='none')
-ax.grid(True)
+    ax.scatter(x=position_x, y=position_y, c=color, s=100.0, label=drone.name.split("_")[0], edgecolors='none')
+
+ax.set_ylim([-10, 80])
+ax.set_xlim([-50, 300])
 ax.set_xlabel('X')
 ax.set_ylabel('Y')
 ax.set_title('Drones position')
 ax.legend()
+ax.grid(True)
 output_file = os.path.join(PLOT_OUTPUT_DIR, "drone_position_plot.png")
 plt.savefig(output_file, dpi=300)
 print(f"|---------{'-'*80}")
@@ -253,35 +253,77 @@ print(f"|- CommunicationComponent metrics: {[metric for metric in component.curr
 #drone.initialize_components()
 print(f"|- Drone {drone.name} components: {drone.components}")
 
-print("\n-----|  WORKFLOW  |-----")
-# Execute a movement task
-# - Tasks are managed by components. 
-task = drone.execute_task(
-    component_name="MoveTo",
-    task_name="Move to waypoint",
-    task_class="MoveToTask",
-    target_state={"position": (100, 100, 50)},
-    properties={"target_position": (100, 100, 50)},
-)
-print(f"|- Task {'-'*80}")
-print_task(task, info_list=['agent_id','component_name','name','current_position','target_position','status'])
+# Mobility Components: MoveToComponent
+# Power Management: ChargingComponent
+# Communication Components: CommunicationComponent
+# Computation Components: CPUComponent, ComputationComponent
+# Sensing Components: ImageSensingComponent, EMSensingComponent, ObjectSensorComponent
+# Logistics Components: LogisticsComponent, 
+"""
+print("\n-----|  TASKS  |-----")
 
-# Create inspection workflow for each drone with staggered start times
-# Define inspection points
-inspection_points = [
+print(f"|- Task {'-'*80}")
+tasks_log = []
+for drone in swarm_1_drones + swarm_2_drones:
+    # Execute a movement task - Tasks are managed by components. 
+    task = drone.execute_task(
+        component_name="MoveTo",
+        task_name="Move to waypoint",
+        task_class="MoveToTask",
+        target_state={"position": (100, 100, 50)},
+        properties={"target_position": (100, 100, 50)},
+    )
+    header, records = print_task(task, info_list=['agent_id','component_name','name','current_position','target_position','status'])
+    tasks_log.append(records)
+    
+print(header)
+for log in tasks_log:
+    print(log)
+"""
+
+print("\n-----|  WORKFLOWS  |-----") # - Workflows generate tasks automatically. Use state machines to monitor agent states
+
+print(f"|- Workflow {'-'*80}")
+workflows_log = []
+
+# Define inspection points, waypoints for inspection workflow
+waypoints = [
     (25, 25, 100),   # Point 1
     (75, 25, 100),   # Point 2
     (75, 75, 100),   # Point 3
     (25, 75, 100),   # Point 4
 ]
 
+# Create inspection workflow for each drone with staggered start times
+for drone in swarm_1_drones + swarm_2_drones:
 
-# Execute a workflow 
-# - Workflows generate tasks automatically. Use state machines to monitor agent states
+    workflow = env.create_workflow(
+        InspectionWorkflow,
+        name="waypoint_inspection",
+        owner=drone,
+        properties={'inspection_points': waypoints},
+        start_trigger=TimeTrigger(env, trigger_time=10),  # Start at time 10
+        max_starts=1
+    )
+
+    """
+    workflow = InspectionWorkflow(
+        env=env,
+        name="manual_inspection",
+        owner=drone,
+        properties={'inspection_points': waypoints}
+    )
+
+    # Register workflow with environment (without trigger)
+    env.workflow_manager.register_workflow(workflow)
+
+    # Start workflow manually
+    workflow.start()
+    """
+
+# Execute a workflow
+
 """
-# Define waypoints for inspection workflow
-waypoints = [(50, 50, 100), (100, 0, 100), (0, 0, 100)]
-
 workflow = create_inspection_workflow(
     env, drone,
     [(0, 0, 100), (50, 50, 100), (100, 100, 100)],
@@ -362,17 +404,18 @@ print("\n=====| RUN THE SIMULATION |=====")
 simulation_time = 1000
 env.run(until=simulation_time)
 
-end_time = time.time()
 # Calculate performance metrics
+end_time = time.time()
 real_time = end_time - start_time
 print("Real Simulation Time: ", end_time)
 performance_ratio = simulation_time / real_time if real_time > 0 else 0
-print("Perfoarmance Ratio: ", performance_ratio)
+print("Performance Ratio: ", performance_ratio)
 
-print_task(task, info_list='all')
+#print_task(task, info_list='all')
 
 print(f"Event queue size: {len(env._queue)}")
 print(f"Events per second: {len(env.event_registry.events) / env.now}")
+"""
 print(f"Events executed: ", end='\n\t')
 i = 0
 for event in env.event_registry.events.keys():
@@ -382,25 +425,32 @@ for event in env.event_registry.events.keys():
         print("", end='\n\t')
 print("")
 
-"""
+
 for e in env._queue:
     print(e.)
 """
-
 
 # Analyze collected statistics
 print("\n" +
     "======================\n" + 
     "|  REPORT STATISTICS |\n" +
     "======================")
-stats_collector.export_data()
+export = stats_collector.export_data()
+
 time.sleep(5)
-analyzer = StatsAnalyzer(stats_dir='./simulation_stats')
-visualizer = StatsVisualizer(stats_dir='./simulation_stats')
+analyzer = StatsAnalyzer(stats_dir=export['output_dir'])
 
 report = analyzer.generate_report()
-#visualizer.visualize_all()
-pprint.pp(report)
+report_filepath = export['output_dir'] + '/report_' + export['output_dir'].split('/')[-1] + '.json'
+analyzer.save_report(output_file=report_filepath)
+# mission completion time
+# success rate
+# per-agent computation time
+
+visualizer = StatsVisualizer(stats_dir=export['output_dir'], report_file=report_filepath)
+visualizer.visualize_all()
+
+# pprint.pp(report)
 
 # Get performance report
 """
