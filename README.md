@@ -14,3 +14,5 @@ Follow this steps to run the simulation:
 
 # Simulation stats
 The folder `$ ~/path/to/AeroAgentSim/simulation_stats` contains the data related to each simulation executed running the step 5.
+
+
