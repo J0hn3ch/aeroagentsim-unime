@@ -55,16 +55,18 @@ import sys
 import time
 import uuid
 
+# |----- LOGGING CONFIGURATION -----|
 os.environ["AEROAGENTSIM_LOG_LEVEL"] = "ERROR"
 os.environ["DEFAULT_LOG_FORMAT"] = "%(asctime)s # %(message)s"
 DEFAULT_LOG_FORMAT = '%(asctime)s # %(message)s'
 PLOT_OUTPUT_DIR = './simulation_stats'
 
 # Configure logging
-logging.basicConfig(level=logging.ERROR, format=DEFAULT_LOG_FORMAT)
-mlogger = get_logger(name=__name__)
-mlogger.setLevel('ERROR')
+logging.basicConfig(level=logging.DEBUG, format=DEFAULT_LOG_FORMAT)
+mlogger = logging.getLogger(name='aeroagentsim')
+mlogger.setLevel(logging.DEBUG)
 
+# |----- PERFORMANCE CONFIGURATION -----|
 # Monitor memory usage
 def check_memory():
     process = psutil.Process()
@@ -72,18 +74,27 @@ def check_memory():
     print(f"Memory usage: {memory_mb:.1f} MB")
     print(f"Objects in memory: {len(gc.get_objects())}")
 
+"""
+profiler = SimulationProfiler(env)
+profiler.start()
+"""
+
+# |----- SYSTEM INFORMATION -----|
 print("\n=====| SYSTEM INFORMATION |=====")
 print(f"|- Python version: {sys.version}")
 print(f"|- AeroAgentSim version: {aeroagentsim.__version__}")
 print(f"|- Platform: {sys.platform}")
+print(f"|- Path execution: ") #{sys.path}
 print("-"*40)
-#print(f"Path: {sys.path}")
 
+
+# |----- SIMULATION ENVIRONMENT -----|
 start_time = time.time()
 
 # Create environment
 env = Environment(visual_interval=15)
 
+# |----- STATISTICS CONFIGURATION -----|
 # Set up statistics collection
 stats_collector = StatsCollector(
     env,
@@ -105,10 +116,6 @@ print(f"|- logger.level: {logger.level}")
 print(f"|- logger.parent: {logger.parent}")
 print(f"|- logger.root: {logger.root}")
 
-"""
-profiler = SimulationProfiler(env)
-profiler.start()
-"""
 
 def print_task(task, info_list=None):
     task_info = {
@@ -145,8 +152,12 @@ def print_task(task, info_list=None):
             l = l + ' | '
     return ('| ' + h, '| ' + l)
 
-
+# |----- SCENARIO CONFIGURATION -----|
 print("\n=====| SCENARIO |=====")
+# Pala Nebiolo 
+# Local Coordinates : 1730000.0, 4250350.0 > latlon_to_local(38.22431587716676, 15.55826378239404, ref_lat=0.0, ref_lon=0.0)
+# Latitude and Longitude : 38.22431587716676, 15.55826378239404 > local_to_latlon(1730000.0, 4250350.0, 80.0)
+# 
 print("\n-----|  AGENTS  |-----")
 # Create swarm of drones agents
 swarm_1_size = 3
@@ -157,12 +168,19 @@ for i in range(swarm_1_size):
     x = (i % 3) * 40
     y = (i // 3) * 40
 
+    # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
-
-    drone = DroneAgent(env, agent_id=f"SD1_{agent_id}", agent_name=f"Swarm1_Drone{i}", properties={
+    drone = env.create_agent(
+        DroneAgent, 
+        agent_id=f"SD1_{agent_id}", 
+        agent_name=f"Swarm1_Drone{i}", 
+        properties={
         'position': (x, y, 100),
-        'battery_level': 100
-    })
+        'battery_level': 100,
+        'status': 'idle'
+        }
+    )
+    #env.register_agent(drone)
 
     # Prefer writing logs/trajectories to run artifacts and trimming. Custom in-memory caches maintained by your own agents/components.
     drone.max_state_history = 100
@@ -171,8 +189,6 @@ for i in range(swarm_1_size):
     drone.add_component(MoveToComponent(env, drone))
     drone.add_component(CommunicationComponent(env, drone))
 
-    # Register agent with environment
-    env.register_agent(drone)
     swarm_1_drones.append(drone)
 
 swarm_2_size = 3
@@ -183,33 +199,25 @@ for i in range(swarm_2_size):
     x = (i % 3) * 40 + 40 * 4
     y = (i // 3) * 40
 
+    # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
-
-    drone = DroneAgent(env, agent_id=f"SD2_{agent_id}", agent_name=f"Swarm2_Drone{i}", properties={
+    drone = env.create_agent(
+        DroneAgent, 
+        agent_id=f"SD2_{agent_id}", 
+        agent_name=f"Swarm2_Drone{i}", 
+        properties={
         'position': (x, y, 100),
         'battery_level': 100,
         'status': 'idle'
-    })
+        }
+    )
+    # env.register_agent(drone)
 
     # Add components to agent
     drone.add_component(MoveToComponent(env, drone))
     drone.add_component(CommunicationComponent(env, drone))
 
-    # Register agent with environment
-    env.register_agent(drone)
     swarm_2_drones.append(drone)
-
-"""
-# Create agent
-agent_id = f"drone_{uuid.uuid4().hex[:8]}"
-drone = env.create_agent(
-    DroneAgent,
-    agent_id,
-    properties={
-        "position": [0, 0, 20],
-        "battery_level": 100,
-    },
-) """
 
 # Plot initial position of each drone
 print(f"|- Drones {'-'*80}")
@@ -236,16 +244,16 @@ output_file = os.path.join(PLOT_OUTPUT_DIR, "drone_position_plot.png")
 plt.savefig(output_file, dpi=300)
 print(f"|---------{'-'*80}")
 
+# |- COMPONENTS DEFINITION
+
 # Verify component has required metrics
 component = drone.get_component('MoveToComponent')
 print(f"|- MoveToComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
 
 drone.add_component( ChargingComponent(env, drone) )
-# Verify component has required metrics
 component = drone.get_component('ChargingComponent')
 print(f"|- ChargingComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
 
-# Verify component has required metrics
 component = drone.get_component('CommunicationComponent')
 print(f"|- CommunicationComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
 
@@ -281,6 +289,7 @@ for log in tasks_log:
     print(log)
 """
 
+# |- WORKFLOWS DEFINITION
 print("\n-----|  WORKFLOWS  |-----") # - Workflows generate tasks automatically. Use state machines to monitor agent states
 
 print(f"|- Workflow {'-'*80}")
@@ -470,4 +479,8 @@ Source:
 
 Data Integration: Weather integration, Signal integration, Traffic integration
     2. Example - Signal integration: http://100.65.26.59:8000/examples.html#signal-integration-with-automatic-management 
+
+
+Best practices : 
+http://100.65.26.59:8000/guides/performance_tuning.html 
 """
