@@ -8,6 +8,7 @@ Two swarm of drones executes must accomplish a mission. If the swarm is not big 
 import aeroagentsim
 from aeroagentsim.core.environment import Environment
 from aeroagentsim.agent import DroneAgent, DeliveryDroneAgent
+from aeroagentsim.agent import TerminalAgent
 from aeroagentsim.agent.delivery_station import DeliveryStation
 
 # Components
@@ -159,14 +160,35 @@ print("\n=====| SCENARIO |=====")
 # Latitude and Longitude : 38.22431587716676, 15.55826378239404 > local_to_latlon(1730000.0, 4250350.0, 80.0)
 # 
 print("\n-----|  AGENTS  |-----")
+# Entities list: Base Agent, DeliveryAgent, DeliveryDroneAgent, DeliveryStation,
+# - DroneAgent, InspectionStation, SensingAgent, TerminalAgent
+
+# Create a ground station
+ground_station1 = env.create_agent(
+    TerminalAgent,
+    agent_name="GS1",
+    properties={
+        'position': (1730000, 4250350, 0)
+    }
+)
+
+ground_station2 = env.create_agent(
+    TerminalAgent,
+    agent_name="GS2",
+    properties={
+        'position': (1729950, 4250300, 0)
+    }
+)
+
+
 # Create swarm of drones agents
 swarm_1_size = 3
 swarm_1_drones = []
 
 for i in range(swarm_1_size):
     # Distribute drones in a grid
-    x = (i % 3) * 40
-    y = (i // 3) * 40
+    x = 1730050 + (i % 3) * 40
+    y = 4250400 + (i // 3) * 40
 
     # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
@@ -175,9 +197,9 @@ for i in range(swarm_1_size):
         agent_id=f"SD1_{agent_id}", 
         agent_name=f"Swarm1_Drone{i}", 
         properties={
-        'position': (x, y, 100),
-        'battery_level': 100,
-        'status': 'idle'
+            'position': (x, y, 100),
+            'battery_level': 100,
+            'status': 'idle'
         }
     )
     #env.register_agent(drone)
@@ -196,8 +218,8 @@ swarm_2_drones = []
 
 for i in range(swarm_2_size):
     # Distribute drones in a grid
-    x = (i % 3) * 40 + 40 * 4
-    y = (i // 3) * 40
+    x = 1730050 + (i % 3) * 40 + 40 * 4
+    y = 4250400 + (i // 3) * 40
 
     # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
@@ -296,11 +318,13 @@ print(f"|- Workflow {'-'*80}")
 workflows_log = []
 
 # Define inspection points, waypoints for inspection workflow
+t_x = 1730000
+t_y = 4250400
 waypoints = [
-    (25, 25, 100),   # Point 1
-    (75, 25, 100),   # Point 2
-    (75, 75, 100),   # Point 3
-    (25, 75, 100),   # Point 4
+    (t_x + 25, t_y + 25, 100),   # Point 1
+    (t_x + 75, t_y + 25, 100),   # Point 2
+    (t_x + 75, t_y + 75, 100),   # Point 3
+    (t_x + 25, t_y + 75, 100),   # Point 4
 ]
 
 # Create inspection workflow for each drone with staggered start times
