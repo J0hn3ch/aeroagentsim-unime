@@ -123,7 +123,7 @@ drone_workflow_list = env.workflow_manager.get_agent_workflows(drone.id)
 mermaid = []
 for w in drone_workflow_list:
     mermaid.append(w.to_mermaid_diagram())
-#print( dir(drone_workflow[0]) )
+<print( dir(drone_workflow[0]) )
 print(mermaid[0])
 exit()
 
