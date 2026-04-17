@@ -79,7 +79,7 @@ from aeroagentsim.utils.logging_config import get_logger
 os.environ["AEROAGENTSIM_LOG_LEVEL"] = "ERROR"   # keep console clean
 OUTPUT_DIR        = "./sim_output"
 SIMULATION_TIME   = 800          # simulated seconds
-VISUAL_INTERVAL   = 20           # stats snapshot interval
+VISUAL_INTERVAL   = 50           # stats snapshot interval
 CONTRACT_TIME     = 60           # when GCS-2 issues the cross-swarm contract
 CONTRACT_DEADLINE = 700          # absolute sim-time deadline for the contract
 CONTRACT_REWARD   = 100.0        # credits rewarded to the accepting drone
@@ -90,11 +90,12 @@ SWARM_SIZE        = 3            # drones per swarm
 ORIGIN = (1_730_000, 4_250_350, 0)
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Configure logging
 logging.basicConfig(level=logging.ERROR, format="%(asctime)s | %(message)s")
 logger = get_logger(__name__)
 logger.setLevel(logging.ERROR)
 logger.parent.setLevel(logging.ERROR)
-
 
 # ---------------------------------------------------------------------------
 # 2.  Waypoint sets
@@ -103,32 +104,32 @@ ox, oy, _ = ORIGIN
 
 # Swarm-1 patrols a small northern zone
 S1_WAYPOINTS = [
-    (ox + 50,  oy + 100, 80),
-    (ox + 100, oy + 100, 80),
-    (ox + 100, oy + 150, 80),
-    (ox + 50,  oy + 150, 80),
+    (ox + 25,  oy + 25, 80),
+    (ox + 75, oy + 25, 80),
+    (ox + 75, oy + 75, 80),
+    (ox + 25,  oy + 75, 80),
 ]
 
 # Swarm-2 patrols a small southern zone
 S2_WAYPOINTS = [
-    (ox + 200, oy + 50,  80),
-    (ox + 250, oy + 50,  80),
-    (ox + 250, oy + 100, 80),
-    (ox + 200, oy + 100, 80),
+    (ox + 50, oy + 50,  80),
+    (ox + 100, oy + 50,  80),
+    (ox + 100, oy + 100, 80),
+    (ox + 50, oy + 100, 80),
 ]
 
 # Extra inspection zone that GCS-2 asks Swarm-1 help with (larger area)
 EXTRA_WAYPOINTS = [
-    (ox + 150, oy + 200, 90),
-    (ox + 200, oy + 200, 90),
-    (ox + 250, oy + 200, 90),
-    (ox + 250, oy + 250, 90),
-    (ox + 150, oy + 250, 90),
+    (ox - 25,  oy - 25, 90),
+    (ox - 75, oy - 25, 90),
+    (ox - 75, oy - 75, 90),
+    (ox - 25,  oy - 75, 90),
+    (ox - 100, oy - 50, 90),
 ]
 
 # GCS positions (ground level)
 GCS1_POS = (ox + 0,   oy + 0,   0)
-GCS2_POS = (ox + 300, oy + 0,   0)
+GCS2_POS = (ox + 100, oy + 0,   0)
 
 # ---------------------------------------------------------------------------
 # 3.  Metric accumulators (populated by event callbacks)
@@ -272,7 +273,10 @@ env = Environment(visual_interval=VISUAL_INTERVAL)
 stats_collector = StatsCollector(
     env,
     output_dir=OUTPUT_DIR,
-    agent_collector_config={"listen_visual_update": True, "collect_interval": VISUAL_INTERVAL},
+    agent_collector_config={
+        "listen_visual_update": True, 
+        "collect_interval": VISUAL_INTERVAL
+    },
 )
 
 # ── Ground Control Stations ───────────────────────────────────────────────
@@ -571,7 +575,9 @@ failed_tasks    = [e for e in task_events if e["status"] == "failed"]
 # 14.  Plotting
 # ---------------------------------------------------------------------------
 print("\n[Plots] Generating figures …")
+os.makedirs(export['output_dir'] + '/visualizations', exist_ok=True)
 FIG_W, FIG_H = 11, 4.5
+PLOT_OUTPUT_DIR = export['output_dir'] + '/visualizations/'
 
 # ── A.  Battery level over time ───────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
@@ -593,7 +599,7 @@ s2_patch = mpatches.Patch(color=colors_s2[1], label="Swarm-2")
 ax.legend(handles=ax.get_lines() + [s1_patch, s2_patch],
           fontsize=7, ncol=4, loc="lower left")
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "A_battery_level.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "A_battery_level.png"), dpi=150)
 plt.close(fig)
 print("  A_battery_level.png ✓")
 
@@ -615,7 +621,7 @@ for ax, metric, ylabel, title in [
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=7, ncol=2)
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "B_communication_quality.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "B_communication_quality.png"), dpi=150)
 plt.close(fig)
 print("  B_communication_quality.png ✓")
 
@@ -636,7 +642,7 @@ s1_patch = mpatches.Patch(color=colors_s1[1], label="Swarm-1")
 s2_patch = mpatches.Patch(color=colors_s2[1], label="Swarm-2")
 ax.legend(handles=[s1_patch, s2_patch])
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "C_distance_travelled.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "C_distance_travelled.png"), dpi=150)
 plt.close(fig)
 print("  C_distance_travelled.png ✓")
 
@@ -660,7 +666,7 @@ ax.set_title("Workflow Status Summary by Group")
 ax.legend(fontsize=9)
 ax.grid(True, axis="y", alpha=0.3)
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "D_workflow_summary.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "D_workflow_summary.png"), dpi=150)
 plt.close(fig)
 print("  D_workflow_summary.png ✓")
 
@@ -681,7 +687,7 @@ ax.set_title("Task Completion Events (● = success, ✕ = fail)")
 ax.legend(fontsize=9)
 ax.grid(True, axis="x", alpha=0.3)
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "E_task_completion_times.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "E_task_completion_times.png"), dpi=150)
 plt.close(fig)
 print("  E_task_completion_times.png ✓")
 
@@ -699,7 +705,7 @@ ax.set_title("Drone–GCS Distance Over Time")
 ax.legend(fontsize=7, ncol=3)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "F_gcs_distance.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "F_gcs_distance.png"), dpi=150)
 plt.close(fig)
 print("  F_gcs_distance.png ✓")
 
@@ -736,7 +742,7 @@ ax.set_title("Scenario Map – Waypoints and Initial Positions")
 ax.legend(fontsize=8)
 ax.grid(True, alpha=0.3)
 plt.tight_layout()
-fig.savefig(os.path.join(OUTPUT_DIR, "G_scenario_map.png"), dpi=150)
+fig.savefig(os.path.join(PLOT_OUTPUT_DIR, "G_scenario_map.png"), dpi=150)
 plt.close(fig)
 print("  G_scenario_map.png ✓")
 
@@ -753,7 +759,7 @@ for w in workflow_results:
     dur = ""
     if w["start_t"] is not None and w["end_t"] is not None:
         dur = f"  duration={w['end_t']-w['start_t']:.1f}s"
-    print(f"  [{w['swarm']:10s}] {w['agent_name']:12s}  "
+    print(f"  [{w['swarm']:7s}] {w['agent_name']:12s}  "
           f"status={w['status']:10s}{dur}")
 
 # Contract log
@@ -793,7 +799,7 @@ for fname in ["A_battery_level.png","B_communication_quality.png",
               "C_distance_travelled.png","D_workflow_summary.png",
               "E_task_completion_times.png","F_gcs_distance.png",
               "G_scenario_map.png"]:
-    print(f"  {OUTPUT_DIR}/{fname}")
+    print(f"  {PLOT_OUTPUT_DIR}/{fname}")
 
 print("\n" + "="*60)
 print("  Simulation complete.")

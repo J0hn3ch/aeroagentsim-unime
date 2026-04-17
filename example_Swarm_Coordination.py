@@ -44,10 +44,14 @@ from aeroagentsim.statistics.stats_analyzer import StatsAnalyzer
 from aeroagentsim.statistics.stats_visualizer import StatsVisualizer
 
 # Plotting
+import matplotlib
+matplotlib.use('Agg') # headless – no display needed
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 import gc
 import logging
+import math
 import numpy as np
 import os
 import pprint
@@ -56,13 +60,35 @@ import sys
 import time
 import uuid
 
-# |----- LOGGING CONFIGURATION -----|
+# |----- ENVIRONMENT CONFIGURATION -----|
 os.environ["AEROAGENTSIM_LOG_LEVEL"] = "ERROR"
 os.environ["DEFAULT_LOG_FORMAT"] = "%(asctime)s # %(message)s"
 DEFAULT_LOG_FORMAT = '%(asctime)s # %(message)s'
-PLOT_OUTPUT_DIR = './simulation_stats'
+SIMULATION_TIME = 1000
+VISUAL_INTERVAL = 15
 
-# Configure logging
+CONTRACT_TIME     = 60           # when GCS-2 issues the cross-swarm contract
+CONTRACT_DEADLINE = 700          # absolute sim-time deadline for the contract
+CONTRACT_REWARD   = 100.0        # credits rewarded to the accepting drone
+CONTRACT_PENALTY  = 0.0          # no penalty (simplifies balance management)
+
+SWARM_NUMBER = 2
+SWARM_SIZE = 3
+OUTPUT_DIR = './simulation_stats'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Pala Nebiolo 
+# Local Coordinates : 1730000.0, 4250350.0 > latlon_to_local(38.22431587716676, 15.55826378239404, ref_lat=0.0, ref_lon=0.0)
+# Latitude and Longitude : 38.22431587716676, 15.55826378239404 > local_to_latlon(1730000.0, 4250350.0, 80.0)
+LOCAL_ORIGIN = (1_730_000, 4_250_350, 0)
+LATLON_ORIGIN = (38.22431587716676, 15.55826378239404, 0)
+ox, oy, _ = LOCAL_ORIGIN
+
+# GCS positions (ground level)
+GCS1_POS = (ox + 0,   oy + 0,   0)
+GCS2_POS = (ox + 100, oy + 0,   0)
+
+# |----- LOGGING CONFIGURATION -----|
 logging.basicConfig(level=logging.DEBUG, format=DEFAULT_LOG_FORMAT)
 mlogger = logging.getLogger(name='aeroagentsim')
 mlogger.setLevel(logging.DEBUG)
@@ -93,16 +119,16 @@ print("-"*40)
 start_time = time.time()
 
 # Create environment
-env = Environment(visual_interval=15)
+env = Environment(visual_interval=VISUAL_INTERVAL)
 
 # |----- STATISTICS CONFIGURATION -----|
 # Set up statistics collection
 stats_collector = StatsCollector(
     env,
-    output_dir='./simulation_stats',
+    output_dir=OUTPUT_DIR,
     agent_collector_config={
         'listen_visual_update': True,
-        'collect_interval': 15
+        'collect_interval': VISUAL_INTERVAL
     }
 )
 
@@ -155,49 +181,105 @@ def print_task(task, info_list=None):
 
 # |----- SCENARIO CONFIGURATION -----|
 print("\n=====| SCENARIO |=====")
-# Pala Nebiolo 
-# Local Coordinates : 1730000.0, 4250350.0 > latlon_to_local(38.22431587716676, 15.55826378239404, ref_lat=0.0, ref_lon=0.0)
-# Latitude and Longitude : 38.22431587716676, 15.55826378239404 > local_to_latlon(1730000.0, 4250350.0, 80.0)
-# 
+
 print("\n-----|  AGENTS  |-----")
 # Entities list: Base Agent, DeliveryAgent, DeliveryDroneAgent, DeliveryStation,
 # - DroneAgent, InspectionStation, SensingAgent, TerminalAgent
 
+class GCSAgent(TerminalAgent):
+    """Ground Control Station – can issue contracts on behalf of its swarm."""
+
+    def __init__(self, env, agent_name, properties=None, agent_id=None):
+        super().__init__(env, agent_name, properties)
+        if agent_id:
+            self.id = agent_id
+        self.swarm_drones: list = []          # drones this GCS controls
+        self.issued_contracts: list = []
+
+    def issue_contract_to_swarm(self, target_drones, task_info,
+                                reward=100.0, penalty=0.0, deadline=float("inf"),
+                                description=""):
+        """
+        Issue a contract addressed to a list of eligible drones.
+        The contract manager will record it as PENDING; the first drone
+        that calls accept_contract() will execute it.
+        """
+        target_ids = [d.id for d in target_drones]
+
+        # GCS needs a non-zero balance to freeze the reward
+        current = self.env.contract_manager.get_agent_balance(self.id)
+        if current < reward:
+            self.env.contract_manager.set_agent_balance(self.id, reward + 50)
+        
+        contract_id = self.env.contract_manager.create_contract(
+            issuer_agent_id=self.id,
+            task_info=task_info,
+            reward=reward,
+            penalty=penalty,
+            deadline=deadline,
+            appointed_agent_ids=target_ids,
+            description=description,
+        )
+
+        if contract_id:
+            self.issued_contracts.append(contract_id)
+            print(f"[t={self.env.now:.0f}] {self.name} issued contract {contract_id} "
+                  f"→ eligible drones: {[d.name for d in target_drones]}")
+            contract_log.append({
+                "event": "issued", "contract_id": contract_id,
+                "issuer": self.name, "time": self.env.now,
+                "description": description,
+            })
+        return contract_id
+
+# ── A. Ground Control Stations ───────────────────────────────────────────────
 # Create a ground station
+agent_id = f"GCS_{uuid.uuid4().hex[:8]}"
 ground_station1 = env.create_agent(
-    TerminalAgent,
-    agent_name="GS1",
+    GCSAgent,
+    agent_name="Ground Control Station 1",
+    agent_id = agent_id,
     properties={
-        'position': (1730000, 4250350, 0)
+        'position': GCS1_POS
     }
 )
 
+agent_id = f"GCS_{uuid.uuid4().hex[:8]}"
 ground_station2 = env.create_agent(
-    TerminalAgent,
-    agent_name="GS2",
+    GCSAgent,
+    agent_name="Ground Control Station 2",
+    agent_id = agent_id,
     properties={
-        'position': (1729950, 4250300, 0)
+        'position': GCS2_POS
     }
 )
+print(f"|- [Agents] {ground_station1.name} (id={ground_station1.id})  pos={GCS1_POS}")
+print(f"|- [Agents] {ground_station2.name} (id={ground_station2.id})  pos={GCS2_POS}")
 
+# ── A.1 - GCS Components ───────────────────────────────────────────────
 
+# ── B. Swarms ───────────────────────────────────────────────
+print(f"|- Drones {'-'*80}")
 # Create swarm of drones agents
 swarm_1_size = 3
 swarm_1_drones = []
 
 for i in range(swarm_1_size):
     # Distribute drones in a grid
-    x = 1730050 + (i % 3) * 40
-    y = 4250400 + (i // 3) * 40
+    x, y, _ = GCS1_POS
+    x += 10 + (i % 3) * 40
+    y += 10 + (i // 3) * 40
+    #x = ox + 10 + (i % 3) * 40
+    #y = oy + 10 + (i // 3) * 40
 
     # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
     drone = env.create_agent(
         DroneAgent, 
         agent_id=f"SD1_{agent_id}", 
-        agent_name=f"Swarm1_Drone{i}", 
+        agent_name=f"Swarm 1/Drone {i}", 
         properties={
-            'position': (x, y, 100),
+            'position': (x, y, 50),
             'battery_level': 100,
             'status': 'idle'
         }
@@ -211,24 +293,29 @@ for i in range(swarm_1_size):
     drone.add_component(MoveToComponent(env, drone))
     drone.add_component(CommunicationComponent(env, drone))
 
-    swarm_1_drones.append(drone)
+    ground_station1.swarm_drones.append(drone)
+    print(f"|- [Agents] {drone.name} (id={drone.id})  pos={(x, y, 50)}")
 
 swarm_2_size = 3
 swarm_2_drones = []
 
 for i in range(swarm_2_size):
     # Distribute drones in a grid
-    x = 1730050 + (i % 3) * 40 + 40 * 4
-    y = 4250400 + (i // 3) * 40
+    x, y, _ = GCS2_POS
+    x += 10 + (i % 3) * 40
+    y += 10 + (i // 3) * 40
+
+    #x = 1730050 + (i % 3) * 40 + 40 * 4
+    #y = 4250400 + (i // 3) * 40
 
     # Register agent with environment
     agent_id = f"drone_{uuid.uuid4().hex[:8]}"
     drone = env.create_agent(
         DroneAgent, 
         agent_id=f"SD2_{agent_id}", 
-        agent_name=f"Swarm2_Drone{i}", 
+        agent_name=f"Swarm 2/Drone {i}", 
         properties={
-        'position': (x, y, 100),
+        'position': (x, y, 50),
         'battery_level': 100,
         'status': 'idle'
         }
@@ -239,34 +326,22 @@ for i in range(swarm_2_size):
     drone.add_component(MoveToComponent(env, drone))
     drone.add_component(CommunicationComponent(env, drone))
 
-    swarm_2_drones.append(drone)
+    ground_station2.swarm_drones.append(drone)
+    print(f"|- [Agents] {drone.name} (id={drone.id})  pos={(x, y, 50)}")
 
-# Plot initial position of each drone
-print(f"|- Drones {'-'*80}")
-fig, ax = plt.subplots(figsize=(12, 6))
-swarms = [swarm_1_drones, swarm_2_drones]
-swarms.reverse()
-for color in ['tab:blue', 'tab:red']:
-    position_x = []
-    position_y = []
-    for drone in swarms.pop():
-        print(f"|- Drone {drone.name} position: {drone.properties['position']}")
-        position_x.append( drone.properties['position'][0] )
-        position_y.append( drone.properties['position'][1] )
-    ax.scatter(x=position_x, y=position_y, c=color, s=100.0, label=drone.name.split("_")[0], edgecolors='none')
 
-ax.set_ylim([-10, 80])
-ax.set_xlim([-50, 300])
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_title('Drones position')
-ax.legend()
-ax.grid(True)
-output_file = os.path.join(PLOT_OUTPUT_DIR, "drone_position_plot.png")
-plt.savefig(output_file, dpi=300)
-print(f"|---------{'-'*80}")
+# ── B.1 Drone Components ───────────────────────────────────────────────
 
 # |- COMPONENTS DEFINITION
+# Mobility Components: MoveToComponent
+# Power Management: ChargingComponent
+# Communication Components: CommunicationComponent
+# Computation Components: CPUComponent, ComputationComponent
+# Sensing Components: ImageSensingComponent, EMSensingComponent, ObjectSensorComponent
+# Logistics Components: LogisticsComponent,
+
+print(f"|- {drone.name} components: {drone.components}")
+print(f"|- {drone.name} details: {drone.get_details()}")
 
 # Verify component has required metrics
 component = drone.get_component('MoveToComponent')
@@ -279,16 +354,9 @@ print(f"|- ChargingComponent metrics: {[metric for metric in component.current_m
 component = drone.get_component('CommunicationComponent')
 print(f"|- CommunicationComponent metrics: {[metric for metric in component.current_metrics.keys()]}")
 
-#print(f"Drone details: {drone.get_details()}")
 #drone.initialize_components()
-print(f"|- Drone {drone.name} components: {drone.components}")
+print(f"|---------{'-'*80}")
 
-# Mobility Components: MoveToComponent
-# Power Management: ChargingComponent
-# Communication Components: CommunicationComponent
-# Computation Components: CPUComponent, ComputationComponent
-# Sensing Components: ImageSensingComponent, EMSensingComponent, ObjectSensorComponent
-# Logistics Components: LogisticsComponent, 
 """
 print("\n-----|  TASKS  |-----")
 
@@ -314,30 +382,98 @@ for log in tasks_log:
 # |- WORKFLOWS DEFINITION
 print("\n-----|  WORKFLOWS  |-----") # - Workflows generate tasks automatically. Use state machines to monitor agent states
 
-print(f"|- Workflow {'-'*80}")
+#print(f"|- Workflow {'-'*80}")
 workflows_log = []
 
+# ── C.1 Workflows ───────────────────────────────────────────────
+def generate_regular_hexagon(side_length=5, center=(0.0, 0.0)):
+    """
+    Generates (x, y) coordinates for a regular hexagon based on its center.
+
+    Parameters:
+    - side_length (float): The length of each side (equals distance from center to vertex).
+    - center (tuple): The (x, y) coordinates of the hexagon's center. Default is (0.0, 0.0).
+
+    Returns:
+    - list of tuples: A list containing the (x, y) coordinates of the path.
+    """
+    cx, cy = center
+    points = []
+
+    # Calculate the 6 vertices (and a 7th to close the loop back to the start)
+    for i in range(7):
+        # 60 degrees (in radians) per vertex
+        angle_rad = math.radians(60 * i)
+        
+        # Calculate X and Y using the center point as the origin
+        x = cx + side_length * math.cos(angle_rad)
+        y = cy + side_length * math.sin(angle_rad)
+        
+        points.append((x, y))
+
+    return points
+
+"""
 # Define inspection points, waypoints for inspection workflow
-t_x = 1730000
-t_y = 4250400
+tx = 1730000
+ty = 4250400
 waypoints = [
-    (t_x + 25, t_y + 25, 100),   # Point 1
-    (t_x + 75, t_y + 25, 100),   # Point 2
-    (t_x + 75, t_y + 75, 100),   # Point 3
-    (t_x + 25, t_y + 75, 100),   # Point 4
+    (tx + 25, ty + 25, 100),   # Point 1
+    (tx + 75, ty + 25, 100),   # Point 2
+    (tx + 75, ty + 75, 100),   # Point 3
+    (tx + 25, ty + 75, 100),   # Point 4
 ]
+"""
+
+# ── Assign own InspectionWorkflows to each swarm ─────────────────────────
+print("\n|- [Setup] Creating swarm 1 inspection workflows …")
 
 # Create inspection workflow for each drone with staggered start times
-for drone in swarm_1_drones + swarm_2_drones:
+i = 1
+for drone in ground_station1.swarm_drones:
+    ox, oy, _ = ground_station1.get_state('position')
+    waypoints = generate_regular_hexagon(
+        side_length=3 + 2*i, 
+        center=(ox, oy)
+    )
+    _ , _ , z = drone.get_state('position')
+    waypoints = [pts + (z, ) for pts in waypoints]
 
     workflow = env.create_workflow(
         InspectionWorkflow,
-        name="waypoint_inspection",
+        name=f"Inspection-{drone.name}",
         owner=drone,
         properties={'inspection_points': waypoints},
         start_trigger=TimeTrigger(env, trigger_time=10),  # Start at time 10
         max_starts=1
     )
+    
+    print(f"|- Workflow > {workflow.name}, Waypoints: {workflow.inspection_points}")
+
+print("\n|- [Setup] Creating swarm 2 inspection workflows …")
+# Create inspection workflow for each drone with staggered start times
+for drone in ground_station2.swarm_drones:
+    
+    ox, oy, _ = ground_station2.get_state('position')
+    
+    waypoints = generate_regular_hexagon(
+        side_length=3 + 2*i, 
+        center=(ox, oy)
+    )
+
+    _ , _ , z = drone.get_state('position')
+    waypoints = [pts + (z, ) for pts in waypoints]
+    
+    workflow = env.create_workflow(
+        InspectionWorkflow,
+        name=f"Inspection-{drone.name}",
+        owner=drone,
+        properties={'inspection_points': waypoints},
+        start_trigger=TimeTrigger(env, trigger_time=10),  # Start at time 10
+        max_starts=1
+    )
+
+    print(f"|- Workflow > {workflow.name}, Waypoints: {workflow.inspection_points}")
 
     """
     workflow = InspectionWorkflow(
@@ -354,9 +490,10 @@ for drone in swarm_1_drones + swarm_2_drones:
     workflow.start()
     """
 
-# Execute a workflow
 
 """
+
+# Execute a workflow
 workflow = create_inspection_workflow(
     env, drone,
     [(0, 0, 100), (50, 50, 100), (100, 100, 100)],
@@ -372,7 +509,6 @@ for trigger in workflow.status_machine.active_triggers:
     print(f"Trigger {trigger.name}: {trigger.is_active()}")
 """
 print("\n-----|  MISSION  |-----")
-
 # Create conditional trigger: create trigger that fires when ...
 #for drone in 
 """
@@ -387,7 +523,6 @@ ready_trigger = StateTrigger(
 """
 
 print("\n-----|  DATA INTEGRATION  |-----")
-
 """
 # Data Provider
 # Create signal provider
@@ -429,7 +564,7 @@ print("\n" +
     "======================")
 existing_ids = [agent.id for agent in env.agents.values()]
 print(f"| Agents: [ {existing_ids} ]")
-print("| Provider: []")
+print(f"| Provider: []")
 print(f"| Workflows: [ {drone.get_active_workflows()} ]")
 
 # Start monitoring (stats collector starts automatically)
@@ -469,6 +604,7 @@ print("\n" +
     "|  REPORT STATISTICS |\n" +
     "======================")
 export = stats_collector.export_data()
+print(f"|- [Stats] Data exported → {export['output_dir']}")
 
 time.sleep(5)
 analyzer = StatsAnalyzer(stats_dir=export['output_dir'])
@@ -480,11 +616,103 @@ analyzer.save_report(output_file=report_filepath)
 # success rate
 # per-agent computation time
 
+# PLOTS
+print("\n" +
+    "======================\n" + 
+    "|        PLOTS       |\n" +
+    "======================")
+# Bounding box with a margin (degrees)
+"""
+MARGIN = 0.003
+all_lats = s1_lats + s2_lats + ex_lats + [gcs1_lat, gcs2_lat]
+all_lons = s1_lons + s2_lons + ex_lons + [gcs1_lon, gcs2_lon]
+BBOX = dict(
+    min_lat = min(all_lats) - MARGIN,
+    max_lat = max(all_lats) + MARGIN,
+    min_lon = min(all_lons) - MARGIN,
+    max_lon = max(all_lons) + MARGIN,
+)
+
+ 
+print(f"Bounding box: lat [{BBOX['min_lat']:.5f}, {BBOX['max_lat']:.5f}]  "
+      f"lon [{BBOX['min_lon']:.5f}, {BBOX['max_lon']:.5f}]")
+"""
 visualizer = StatsVisualizer(stats_dir=export['output_dir'], report_file=report_filepath)
-visualizer.visualize_all()
+#visualizer.visualize_all()
+
+# Plot styles
+STYLE = {
+    ground_station1.id : { 'color': 'tab:blue' },
+    ground_station2.id : { 'color': 'tab:red' },
+    'Swarm 1': { 'color': 'tab:blue' },
+    'Swarm 2': { 'color': 'tab:red' }
+}
+# ── PLOT A. Drone Initial Position ───────────────────────────────────────────
+# Plot initial position of each drone
+fig, ax = plt.subplots(figsize=(12, 6))
+gcs = [ground_station1, ground_station2]
+swarms = [gcs_.swarm_drones for gcs_ in gcs]
+
+for swarm in swarms:
+    position_x = []
+    position_y = []
+    
+    for drone in swarm:
+        swarm_label = drone.name.split("/")[0]
+        print(f"|- Drone {drone.name} position: {drone.properties['position']}")
+        position_x.append( drone.properties['position'][0] )
+        position_y.append( drone.properties['position'][1] )
+    # Add drones to plot
+    ax.scatter(
+        x=position_x, y=position_y, 
+        c=STYLE[swarm_label]['color'], s=200, label=swarm_label, 
+        marker='^', edgecolors='none')
+
+# Add GCS to plot
+ax.scatter(x=GCS1_POS[0], y=GCS1_POS[1], 
+    c=STYLE[ground_station1.id]['color'], s=200, label=ground_station1.name, 
+    marker='o', edgecolors='none'
+)
+ax.scatter(x=GCS2_POS[0], y=GCS2_POS[1], 
+    c=STYLE[ground_station2.id]['color'], s=200, label=ground_station2.name, 
+    marker='o', edgecolors='none'
+)
+
+ax.set_ylim([oy-150, oy+150])
+ax.set_xlim([ox-150, ox+150])
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_title('GCS & Drones - Local Coordinates')
+ax.legend()
+ax.grid(True)
+plt.tight_layout()
+plt.savefig( os.path.join(OUTPUT_DIR, "A_drone_gcs_initial_position.png"), dpi=300 )
+plt.close(fig)
+print("  A_drone_gcs_initial_position.png ✓")
+
+# ── PLOT B. Workflow ───────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(12, 6))
+
+plt.savefig( os.path.join(OUTPUT_DIR, "B_workflows.png"), dpi=300 )
+plt.close(fig)
+print("  B_workflow.png ✓")
+
+# ── PLOT F. CS distance over time ───────────────────────────────────
+fig, ax = plt.subplots(figsize=(12, 6))
+
+plt.savefig( os.path.join(OUTPUT_DIR, "F_CS_distance.png"), dpi=300 )
+plt.close(fig)
+print("  F_CS_distance.png ✓")
+
+# ── PLOT G. Trajectory map (top view, X-Y) ───────────────────────────────────
+fig, ax = plt.subplots(figsize=(12, 6))
+
+
+plt.savefig( os.path.join(OUTPUT_DIR, "G_Trajectory_map_XY.png"), dpi=300 )
+plt.close(fig)
+print("  G_Trajectory_map_XY.png ✓")
 
 # pprint.pp(report)
-
 # Get performance report
 """
 report = profiler.get_report()
