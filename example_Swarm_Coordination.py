@@ -253,8 +253,8 @@ ground_station2 = env.create_agent(
         'position': GCS2_POS
     }
 )
-print(f"|- [Agents] {ground_station1.name} (id={ground_station1.id})  pos={GCS1_POS}")
-print(f"|- [Agents] {ground_station2.name} (id={ground_station2.id})  pos={GCS2_POS}")
+print(f"|- [Agents] {ground_station1.name} ({ground_station1.id})  pos={GCS1_POS}")
+print(f"|- [Agents] {ground_station2.name} ({ground_station2.id})  pos={GCS2_POS}")
 
 # ── A.1 - GCS Components ───────────────────────────────────────────────
 
@@ -449,9 +449,11 @@ for drone in ground_station1.swarm_drones:
     )
     
     print(f"|- Workflow > {workflow.name}, Waypoints: {workflow.inspection_points}")
+    i += 1
 
 print("\n|- [Setup] Creating swarm 2 inspection workflows …")
 # Create inspection workflow for each drone with staggered start times
+i = 1
 for drone in ground_station2.swarm_drones:
     
     ox, oy, _ = ground_station2.get_state('position')
@@ -474,6 +476,7 @@ for drone in ground_station2.swarm_drones:
     )
 
     print(f"|- Workflow > {workflow.name}, Waypoints: {workflow.inspection_points}")
+    i += 1
 
     """
     workflow = InspectionWorkflow(
@@ -647,11 +650,13 @@ STYLE = {
     'Swarm 1': { 'color': 'tab:blue' },
     'Swarm 2': { 'color': 'tab:red' }
 }
+
+gcs_s = [ground_station1, ground_station2]
+swarms = [gcs.swarm_drones for gcs in gcs_s]
+
 # ── PLOT A. Drone Initial Position ───────────────────────────────────────────
 # Plot initial position of each drone
 fig, ax = plt.subplots(figsize=(12, 6))
-gcs = [ground_station1, ground_station2]
-swarms = [gcs_.swarm_drones for gcs_ in gcs]
 
 for swarm in swarms:
     position_x = []
@@ -671,11 +676,11 @@ for swarm in swarms:
 # Add GCS to plot
 ax.scatter(x=GCS1_POS[0], y=GCS1_POS[1], 
     c=STYLE[ground_station1.id]['color'], s=200, label=ground_station1.name, 
-    marker='o', edgecolors='none'
+    marker='*', edgecolors='none'
 )
 ax.scatter(x=GCS2_POS[0], y=GCS2_POS[1], 
     c=STYLE[ground_station2.id]['color'], s=200, label=ground_station2.name, 
-    marker='o', edgecolors='none'
+    marker='*', edgecolors='none'
 )
 
 ax.set_ylim([oy-150, oy+150])
@@ -691,7 +696,42 @@ plt.close(fig)
 print("  A_drone_gcs_initial_position.png ✓")
 
 # ── PLOT B. Workflow ───────────────────────────────────────────
+from matplotlib.collections import LineCollection
+
 fig, ax = plt.subplots(figsize=(12, 6))
+
+#def plot_drone_path(path)
+path_collection = []
+for swarm in swarms:
+    for drone in swarm:
+        drone_workflows = env.workflow_manager.get_agent_workflows(drone.id)
+
+        for workflow in drone_workflows:
+            path_2d = [(point[0], point[1]) for point in workflow.inspection_points]
+            path_collection.append( path_2d )
+        
+        # Mark the drone
+        drone_position = drone.properties['position']
+        ax.plot(drone_position[0], drone_position[1], marker='^', color='black', markersize=8, label=drone.name)
+
+colors = ["indigo", "blue", "green", "yellow", "orange", "red"]
+lc = LineCollection(path_collection, linestyle='-', color=colors)
+ax.add_collection(lc)
+ax.autoscale()
+
+# Mark the GCSs
+for gcs in gcs_s:
+    gcs_position = gcs.properties['position']
+    ax.plot(gcs_position[0], gcs_position[1], marker='*', color='black', markersize=8, label=gcs.name)
+
+# Format the plot
+plt.title(f"Drone Paths: Incremental Hexagon\n)")
+plt.xlabel("Local X [meters]")
+plt.ylabel("Local Y [meters]")
+plt.axis('equal') # Crucial: ensures the X and Y scales match so the hexagon isn't distorted
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend()
+plt.tight_layout()
 
 plt.savefig( os.path.join(OUTPUT_DIR, "B_workflows.png"), dpi=300 )
 plt.close(fig)
@@ -707,6 +747,13 @@ print("  F_CS_distance.png ✓")
 # ── PLOT G. Trajectory map (top view, X-Y) ───────────────────────────────────
 fig, ax = plt.subplots(figsize=(12, 6))
 
+def plot_waypoints(wps, color, label, marker="D"):
+    xs = [p[0]-ox for p in wps]
+    ys = [p[1]-oy for p in wps]
+    ax.plot(xs, ys, "--", color=color, alpha=0.4, linewidth=1)
+    ax.scatter(xs, ys, color=color, marker=marker, s=60, zorder=4, label=label)
+
+#plot_waypoints(S1_WAYPOINTS,    "#1565c0", "S1 waypoints")
 
 plt.savefig( os.path.join(OUTPUT_DIR, "G_Trajectory_map_XY.png"), dpi=300 )
 plt.close(fig)

@@ -6,6 +6,7 @@ from aeroagentsim.workflow.inspection import InspectionWorkflow
 from aeroagentsim.core.trigger import TimeTrigger
 
 import math
+import pprint
 
 LOCAL_ORIGIN = (1730000, 4250350, 0)
 LATLON_ORIGIN = (38.22431587716676, 15.55826378239404, 0)
@@ -88,7 +89,6 @@ def generate_regular_hexagon(side_length=5, local_origin=(0.0, 0.0)):
 
 ox, oy, _ = ground_station1.get_state('position')
 
-
 waypoints = generate_regular_hexagon(
     side_length=3 + 2, 
     local_origin=(ox - 1, oy - 1)
@@ -120,13 +120,39 @@ workflow = env.create_workflow(
 )
 
 drone_workflow_list = env.workflow_manager.get_agent_workflows(drone.id)
-mermaid = []
-for w in drone_workflow_list:
-    mermaid.append(w.to_mermaid_diagram())
-<print( dir(drone_workflow[0]) )
-print(mermaid[0])
-exit()
 
-print("\n=====| RUN THE SIMULATION |=====")
-simulation_time = 1000
-env.run(until=simulation_time)
+mermaid = []
+
+
+def print_workflow_info(drone_workflow_list):
+    for w in drone_workflow_list:
+        print(f"\n Workflow Id: {w.id}")
+        print(f"\t Name: {w.name}")
+        print(f"\t Owner: {w.owner.name} ({w.owner.id})")
+        print(f"\t Is active: {w.is_active()}")
+        print(f"\t Events: {w.event_names}")
+        print(f"\t Inspection points: {w.inspection_points}")
+        print(f"\t Start time: {w.start_time}")
+        print(f"\t Status: {w.status.value}\n")
+
+        status_machine = w.status_machine
+        print(f"-"*30)
+        print(f"STATUS MACHINE - ")
+        print(f"-"*30)
+        print(f"\t Current status: {status_machine.current_status}")
+        print(f"\t Process: {w.sm_process} / {status_machine.process}")
+        print(f"\t Start status: {status_machine.start_status}")
+        print(f"\t State transitions : ") # status_machine.state_transitions
+        #mermaid.append(w.to_mermaid_diagram())
+    return w
+
+w = print_workflow_info(drone_workflow_list)
+
+#print( dir(drone_workflow_list[0]) )
+#print(mermaid[0])
+
+#print("\n=====| RUN THE SIMULATION |=====")
+#simulation_time = 1000
+#env.run(until=simulation_time)
+
+#print_workflow_info(drone_workflow_list)
