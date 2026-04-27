@@ -29,8 +29,7 @@ from aeroagentsim.dataprovider.signal_integration import ExternalSignalSourceInt
 from aeroagentsim.core.utils import Location, calculate_distance
 # Conversion
 # from aeroagentsim.core.utils import convert_coordinate # do nothing
-from aeroagentsim.core.utils import latlon_to_local
-from aeroagentsim.core.utils import local_to_latlon
+from aeroagentsim.core.utils import latlon_to_local, local_to_latlon
 # Time
 from aeroagentsim.core.utils import utm_zone_for_lon
 
@@ -85,8 +84,10 @@ LATLON_ORIGIN = (38.22431587716676, 15.55826378239404, 0)
 ox, oy, _ = LOCAL_ORIGIN
 
 # GCS positions (ground level)
-GCS1_POS = (ox + 0,   oy + 0,   0)
-GCS2_POS = (ox + 100, oy + 0,   0)
+GCS1_POS = (ox - 45,   oy - 15,   0)
+GCS2_POS = (ox + 45, oy - 15,   0)
+GCS1_LATLON = local_to_latlon(x=GCS1_POS[0],y=GCS1_POS[1], ref_lat=LATLON_ORIGIN[0], ref_lon=LATLON_ORIGIN[1])
+GCS2_LATLON = local_to_latlon(x=GCS2_POS[0],y=GCS2_POS[1], ref_lat=LATLON_ORIGIN[0], ref_lon=LATLON_ORIGIN[1])
 
 # |----- LOGGING CONFIGURATION -----|
 logging.basicConfig(level=logging.DEBUG, format=DEFAULT_LOG_FORMAT)
@@ -267,8 +268,8 @@ swarm_1_drones = []
 for i in range(swarm_1_size):
     # Distribute drones in a grid
     x, y, _ = GCS1_POS
-    x += 10 + (i % 3) * 40
-    y += 10 + (i // 3) * 40
+    x += 10 + (i % 3) * 20
+    y += 10 + (i // 3) * 20
     #x = ox + 10 + (i % 3) * 40
     #y = oy + 10 + (i // 3) * 40
 
@@ -302,8 +303,8 @@ swarm_2_drones = []
 for i in range(swarm_2_size):
     # Distribute drones in a grid
     x, y, _ = GCS2_POS
-    x += 10 + (i % 3) * 40
-    y += 10 + (i // 3) * 40
+    x += 10 + (i % 3) * 20
+    y += 10 + (i // 3) * 20
 
     #x = 1730050 + (i % 3) * 40 + 40 * 4
     #y = 4250400 + (i // 3) * 40
@@ -645,8 +646,8 @@ visualizer = StatsVisualizer(stats_dir=export['output_dir'], report_file=report_
 
 # Plot styles
 STYLE = {
-    ground_station1.id : { 'color': 'tab:blue' },
-    ground_station2.id : { 'color': 'tab:red' },
+    ground_station1.id : dict(color="#ffdd00", marker="*", markersize=100, label=ground_station1.name),
+    ground_station2.id : dict(color="#00fbff", marker="*", markersize=100, label=ground_station2.name),
     'Swarm 1': { 'color': 'tab:blue' },
     'Swarm 2': { 'color': 'tab:red' }
 }
@@ -700,22 +701,27 @@ from matplotlib.collections import LineCollection
 
 fig, ax = plt.subplots(figsize=(12, 6))
 
-#def plot_drone_path(path)
 path_collection = []
+path_latlon_collection = []
 for swarm in swarms:
     for drone in swarm:
         drone_workflows = env.workflow_manager.get_agent_workflows(drone.id)
 
         for workflow in drone_workflows:
             path_2d = [(point[0], point[1]) for point in workflow.inspection_points]
+            path_2d_latlon = [local_to_latlon(point[0], point[1])[0:2][::-1] for point in workflow.inspection_points]
             path_collection.append( path_2d )
+            path_latlon_collection.append( path_2d_latlon )
+
         
         # Mark the drone
-        drone_position = drone.properties['position']
-        ax.plot(drone_position[0], drone_position[1], marker='^', color='black', markersize=8, label=drone.name)
+        #drone_position = drone.properties['position']
+        drone_current_position = drone.get_current_states()['position']
+        ax.plot(drone_current_position[0], drone_current_position[1], marker='^', color='black', markersize=8, label=drone.name)
 
 colors = ["indigo", "blue", "green", "yellow", "orange", "red"]
 lc = LineCollection(path_collection, linestyle='-', color=colors)
+lc_latlon = LineCollection(path_latlon_collection, linestyle='-', color=colors)
 ax.add_collection(lc)
 ax.autoscale()
 
@@ -725,7 +731,7 @@ for gcs in gcs_s:
     ax.plot(gcs_position[0], gcs_position[1], marker='*', color='black', markersize=8, label=gcs.name)
 
 # Format the plot
-plt.title(f"Drone Paths: Incremental Hexagon\n)")
+plt.title(f"Drone Paths: Incremental Hexagon")
 plt.xlabel("Local X [meters]")
 plt.ylabel("Local Y [meters]")
 plt.axis('equal') # Crucial: ensures the X and Y scales match so the hexagon isn't distorted
@@ -758,6 +764,52 @@ def plot_waypoints(wps, color, label, marker="D"):
 plt.savefig( os.path.join(OUTPUT_DIR, "G_Trajectory_map_XY.png"), dpi=300 )
 plt.close(fig)
 print("  G_Trajectory_map_XY.png ✓")
+
+# ── PLOT H. Latitude and Longitude Map - GCS and Swarm path (top view) ───────
+import contextily as ctx
+import geopandas as gpd
+fig, ax = plt.subplots(figsize=(12, 10))
+
+# Set axis limits to bounding box (lon/lat)
+ax.set_xlim(LATLON_ORIGIN[1] - 0.001, LATLON_ORIGIN[1] + 0.001) # Longitude
+ax.set_ylim(LATLON_ORIGIN[0] - 0.001, LATLON_ORIGIN[0] + 0.001) # Latitude
+
+# Add satellite tile background
+ctx.add_basemap(
+    ax,
+    crs="EPSG:4326", # Use crs="EPSG:4326" to work in lon/lat directly
+    source=ctx.providers.Esri.WorldImagery,
+    zoom="auto",
+    attribution_size=6,
+)
+
+# Draw scenario elements
+# Mark Ground Control Stations
+for gcs in gcs_s:
+    gcs_local = gcs.properties['position']
+    gcs_latlon = local_to_latlon(x=gcs_local[0],y=gcs_local[1])
+    style = STYLE[gcs.id]
+    ax.scatter( gcs_latlon[1], gcs_latlon[0], zorder=6, 
+        marker=style['marker'], s=style['markersize'],
+        color=style['color'], label=style['label']
+    )
+
+# Draw Workflows Inspection Points
+ax.add_collection(lc_latlon)
+ax.autoscale()
+
+# Format the plot
+plt.title(f"Satellite Map")
+plt.suptitle("Pala Nebiolo")
+plt.xlabel("Longitude [degree]")
+plt.ylabel("Latitude [degree]")
+plt.axis('equal') # Crucial: ensures the X and Y scales match so the hexagon isn't distorted
+plt.legend()
+plt.tight_layout()
+
+plt.savefig( os.path.join(OUTPUT_DIR, "H_Latlon_Satellite_Map_XY.png"), dpi=300, bbox_inches="tight")
+plt.close(fig)
+print("  H_Latlon_Satellite_Map_XY.png ✓")
 
 # pprint.pp(report)
 # Get performance report

@@ -51,6 +51,7 @@ drone = env.create_agent(
     )
 
 drone.add_component(MoveToComponent(env, drone))
+drone.add_component(ChargingComponent(env, drone))
 drone.add_component(CommunicationComponent(env, drone))
 
 def generate_regular_hexagon(side_length=5, local_origin=(0.0, 0.0)):
@@ -152,7 +153,10 @@ w = print_workflow_info(drone_workflow_list)
 #print(mermaid[0])
 
 #print("\n=====| RUN THE SIMULATION |=====")
-#simulation_time = 1000
-#env.run(until=simulation_time)
+simulation_time = 1000
+env.run(until=simulation_time)
 
-#print_workflow_info(drone_workflow_list)
+print_workflow_info(drone_workflow_list)
+
+for key, value in drone.get_current_states().items():
+    print(f"{key}: {value}")
